@@ -1,0 +1,103 @@
+#include <pthread.h>
+#include <semaphore.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+#define TAM 5
+#define PENSANDO 0
+#define FAMINTO 1
+#define COMENDO 2
+
+int estado[TAM];
+int tentativas_falhas[TAM] = {0};
+
+sem_t mutex;
+sem_t garfo[TAM];
+pthread_cond_t cond[TAM];
+
+int esq(int id_filo) {
+    return (id_filo + TAM - 1) % TAM;
+}
+
+int dir(int id_filo) {
+    return (id_filo + 1) % TAM;
+}
+
+void test(int id_filo) {
+    if (estado[id_filo] == FAMINTO && estado[esq(id_filo)] != COMENDO && estado[dir(id_filo)] != COMENDO) {
+        estado[id_filo] = COMENDO;
+        printf("Filosofo %d pega garfo %d e %d\n", id_filo + 1, esq(id_filo) + 1, id_filo + 1);
+        printf("Filosofo %d esta comendo\n", id_filo + 1);
+        sleep(1);
+        sem_post(&garfo[id_filo]);
+    }
+}
+
+void pega_garfo(int id_filo) {
+    sem_wait(&mutex);
+    estado[id_filo] = FAMINTO;
+    printf("Filosofo %d esta com fome (Tentativas falhas: %d)\n", id_filo + 1, tentativas_falhas[id_filo] + 1);
+    test(id_filo);
+
+    if (estado[id_filo] != COMENDO) {
+        tentativas_falhas[id_filo]++;
+
+        if (tentativas_falhas[id_filo] >= 3) {
+            // Se o filósofo falhou 3 vezes consecutivas, ele será priorizado na próxima tentativa
+            tentativas_falhas[id_filo] = 0;
+            pthread_cond_signal(&cond[id_filo]);
+        } else {
+            pthread_cond_wait(&cond[id_filo], &mutex);
+        }
+    } else {
+        tentativas_falhas[id_filo] = 0;
+    }
+
+    sem_post(&mutex);
+    sem_wait(&garfo[id_filo]);
+}
+
+void solta_garfo(int id_filo) {
+    sem_wait(&mutex);
+    estado[id_filo] = PENSANDO;
+    printf("Filosofo %d libera garfo %d e %d\n", id_filo + 1, esq(id_filo) + 1, id_filo + 1);
+    printf("Filosofo %d esta pensando\n", id_filo + 1);
+    test(esq(id_filo));
+    test(dir(id_filo));
+    sem_post(&mutex);
+}
+
+void* func_filo(void* num) {
+    int* i = num;
+    for (;;) {
+        sleep(1);
+        pega_garfo(*i);
+        sleep(0);
+        solta_garfo(*i);
+    }
+}
+
+int main() {
+    int i;
+    pthread_t thread_id[TAM];
+    sem_init(&mutex, 0, 1);
+
+    for (i = 0; i < TAM; i++) {
+        sem_init(&garfo[i], 0, 0);
+        pthread_cond_init(&cond[i], NULL);
+    }
+
+    int filosofos[TAM] = { 0, 1, 2, 3, 4 };
+
+    for (i = 0; i < TAM; i++) {
+        pthread_create(&thread_id[i], NULL, func_filo, &filosofos[i]);
+        printf("Filosofo %d esta pensando inicialmente\n", i + 1);
+    }
+
+    for (i = 0; i < TAM; i++) {
+        pthread_join(thread_id[i], NULL);
+    }
+
+    return 0;
+}
